@@ -1,48 +1,25 @@
 #!/usr/bin/env bash
 
 # @describe PIPL Search API client for people intelligence and data enrichment
-# @arg command "Command to run (people, email, phone, pointer, person-json)" [string]
-# @arg value "Email address for email command, phone number for phone command, search pointer for pointer command, person JSON for person-json command" [string]
-
-# Global options (available for all commands)
-# @option -k --key "PIPL API key (can also use PIPL_API_KEY env var)" [string]
-# @flag   -j --json "Deprecated - JSON is now the default output"
-# @flag   -q --quiet "Suppress colored output"
-
-
-# Search configuration options (available for all search commands)
-# @option --minimum-probability "Minimum acceptable probability for inferred data (0-1)" [float] @default "0.9"
-# @option --minimum-match "Minimum required match score for possible persons (0-1)" [float] @default "0"
-# @option --show-sources "Sources to show (true, false, all, matching)" [string] @default "false"
-# @flag   --live-feeds "Whether to use live data sources"
-# @option --match-requirements "Fields that must be present in response" [string]
-# @option --source-category-requirements "Source categories that must be present" [string]
-# @flag   --no-top-match "Return all matches instead of just the top match (default: top match only)"
-# @flag   --hide-sponsored "Omit sponsored results"
-
-# People search parameters (only available for 'people' command)
-# @option -f --first-name "First name or given name" [string]
-# @option -m --middle-name "Middle name" [string]
-# @option -l --last-name "Last name or family name" [string]
-# @option --raw-name "Full name (use if not parsed into components)" [string]
-# @option --house "House number" [string]
-# @option --street "Street portion of address" [string]
-# @option -c --city "City" [string]
-# @option -s --state "State or province" [string]
-# @option -z --zipcode "Zipcode or postal code" [string]
-# @option --country "Country ISO Alpha 2-Code" [string]
-# @option --raw-address "Full address (use if not parsed into components)" [string]
-# @option -a --age "Exact (YY) or approximate (YY-YY) age" [string]
-# @option -u --username "Username (minimum 3 characters)" [string]
-# @option --user-id "User ID with service name (e.g. 11231@facebook)" [string]
-# @option --url "Social media profile URL" [string]
 # @meta require-tools curl,jq
 
-eval "$(argc --argc-eval "$0" "$@")"
+# Global options
+# @option -k --key "PIPL API key (can also use PIPL_API_KEY env var)"
+# @flag -j --json "Output raw JSON (default is formatted)"
+# @flag -q --quiet "Suppress colored output"
 
-# Setup colors
+# Search configuration options (inherited by search commands)
+# @option --minimum-probability "Minimum acceptable probability for inferred data (0-1)" @default "0.9"
+# @option --minimum-match "Minimum required match score for possible persons (0-1)" @default "0"
+# @option --show-sources "Sources to show" [true|false|all|matching] @default "true"
+# @flag --no-live-feeds "Disable live data sources"
+# @option --match-requirements "Fields that must be present in response"
+# @option --source-category-requirements "Source categories that must be present"
+# @flag --top-match "Return only the top match (default behavior)"
+# @flag --hide-sponsored "Omit sponsored results"
+
 setup_colors() {
-  if [ "${argc_quiet:-0}" = 1 ] || [ -z "$TERM" ] || [ "$TERM" = "dumb" ]; then
+  if [[ "${argc_quiet:-0}" == "1" || -z "$TERM" || "$TERM" == "dumb" ]]; then
     bold="" reset="" blue="" green="" yellow="" cyan="" magenta="" red="" dim=""
   else
     bold=$(tput bold) reset=$(tput sgr0) blue=$(tput setaf 4) green=$(tput setaf 2)
@@ -50,44 +27,18 @@ setup_colors() {
     dim=$(tput dim)
   fi
 }
-setup_colors
 
-# Get API key from multiple sources
 get_api_key() {
-  if [ -n "$argc_key" ]; then
+  if [[ -n "$argc_key" ]]; then
     echo "$argc_key"
-  elif [ -n "$PIPL_API_KEY" ]; then
+  elif [[ -n "$PIPL_API_KEY" ]]; then
     echo "$PIPL_API_KEY"
-  elif [ -f "$HOME/.config/pipl/api_key" ]; then
+  elif [[ -f "$HOME/.config/pipl/api_key" ]]; then
     cat "$HOME/.config/pipl/api_key"
   else
-    echo "${red}Error:${reset} No PIPL API key found." >&2
-    echo "Either:" >&2
-    echo "  1. Pass it with --key" >&2
-    echo "  2. Set PIPL_API_KEY environment variable" >&2
-    echo "  3. Save it to ~/.config/pipl/api_key" >&2
+    printf "%sError:%s No PIPL API key found.\n" "$red" "$reset" >&2
+    echo "Set with --key, PIPL_API_KEY env var, or ~/.config/pipl/api_key file" >&2
     exit 1
-  fi
-}
-API_KEY=$(get_api_key)
-API_BASE="https://api.pipl.com"
-
-# Helper functions
-print_kv() {
-  printf "${bold}%s:${reset} %s\n" "$1" "$2"
-}
-
-print_section() {
-  printf "\n${bold}%s:${reset}\n" "$1"
-}
-
-format_date_range() {
-  local start="$1"
-  local end="$2"
-  if [ "$start" = "$end" ]; then
-    echo "$start"
-  else
-    echo "${start} - ${end}"
   fi
 }
 
@@ -96,27 +47,29 @@ make_request() {
   local params="$2"
   local data="$3"
 
-  local url="${API_BASE}/search?key=${API_KEY}${params}"
+  local url="https://api.pipl.com/search?key=${API_KEY}${params}"
   local response
 
-  if [ "$method" = "GET" ]; then
+  if [[ "$method" == "GET" ]]; then
     response=$(curl -s "$url")
   else
     response=$(curl -s -X POST -H "Content-Type: application/x-www-form-urlencoded" -d "$data" "$url")
   fi
 
-  # Check for errors
-  local http_status=$(echo "$response" | jq -r '.["@http_status_code"] // 200')
-  if [ "$http_status" != "200" ]; then
-    local error_msg=$(echo "$response" | jq -r '.error // "Unknown error"')
-    printf "${red}Error (HTTP %s):${reset} %s\n" "$http_status" "$error_msg" >&2
+  local http_status
+  http_status=$(echo "$response" | jq -r '.["@http_status_code"] // 200')
+  if [[ "$http_status" != "200" ]]; then
+    local error_msg
+    error_msg=$(echo "$response" | jq -r '.error // "Unknown error"')
+    printf "%sError (HTTP %s):%s %s\n" "$red" "$http_status" "$error_msg" "$reset" >&2
 
-    local warnings=$(echo "$response" | jq -r '.warnings[]? // empty' 2>/dev/null)
-    if [ -n "$warnings" ]; then
-      printf "${yellow}Warnings:${reset}\n" >&2
-      echo "$warnings" | while read -r warning; do
-        printf "  ${yellow}•${reset} %s\n" "$warning" >&2
-      done
+    local warnings
+    warnings=$(echo "$response" | jq -r '.warnings[]?' 2>/dev/null)
+    if [[ -n "$warnings" ]]; then
+      printf "%sWarnings:%s\n" "$yellow" "$reset" >&2
+      while read -r warning; do
+        printf "  %s•%s %s\n" "$yellow" "$reset" "$warning" >&2
+      done <<<"$warnings"
     fi
     exit 1
   fi
@@ -127,565 +80,391 @@ make_request() {
 build_search_params() {
   local params=""
 
-  # Search configuration
-  [ -n "$argc_minimum_probability" ] && params="${params}&minimum_probability=${argc_minimum_probability}"
-  [ -n "$argc_minimum_match" ] && params="${params}&minimum_match=${argc_minimum_match}"
-  [ -n "$argc_show_sources" ] && params="${params}&show_sources=${argc_show_sources}"
-  if [ "$argc_live_feeds" = 1 ]; then
-    params="${params}&live_feeds=true"
-  else
-    params="${params}&live_feeds=false"
-  fi
-  [ -n "$argc_match_requirements" ] && params="${params}&match_requirements=${argc_match_requirements}"
-  [ -n "$argc_source_category_requirements" ] && params="${params}&source_category_requirements=${argc_source_category_requirements}"
-  # Default to top_match=true unless --no-top-match is specified
-  if [ "$argc_no_top_match" != 1 ]; then
-    params="${params}&top_match=true"
-  fi
-  [ "$argc_hide_sponsored" = 1 ] && params="${params}&hide_sponsored=true"
-
-  # Name parameters
-  [ -n "$argc_first_name" ] && params="${params}&first_name=$(printf '%s' "$argc_first_name" | sed 's/ /%20/g')"
-  [ -n "$argc_middle_name" ] && params="${params}&middle_name=$(printf '%s' "$argc_middle_name" | sed 's/ /%20/g')"
-  [ -n "$argc_last_name" ] && params="${params}&last_name=$(printf '%s' "$argc_last_name" | sed 's/ /%20/g')"
-  [ -n "$argc_raw_name" ] && params="${params}&raw_name=$(printf '%s' "$argc_raw_name" | sed 's/ /%20/g')"
-
-  # Address parameters
-  [ -n "$argc_house" ] && params="${params}&house=$(printf '%s' "$argc_house" | sed 's/ /%20/g')"
-  [ -n "$argc_street" ] && params="${params}&street=$(printf '%s' "$argc_street" | sed 's/ /%20/g')"
-  [ -n "$argc_city" ] && params="${params}&city=$(printf '%s' "$argc_city" | sed 's/ /%20/g')"
-  [ -n "$argc_state" ] && params="${params}&state=$(printf '%s' "$argc_state" | sed 's/ /%20/g')"
-  [ -n "$argc_zipcode" ] && params="${params}&zipcode=${argc_zipcode}"
-  [ -n "$argc_country" ] && params="${params}&country=${argc_country}"
-  [ -n "$argc_raw_address" ] && params="${params}&raw_address=$(printf '%s' "$argc_raw_address" | sed 's/ /%20/g')"
-
-  # Other parameters
-  [ -n "$argc_age" ] && params="${params}&age=${argc_age}"
-  [ -n "$argc_username" ] && params="${params}&username=${argc_username}"
-  [ -n "$argc_user_id" ] && params="${params}&user_id=${argc_user_id}"
-  [ -n "$argc_url" ] && params="${params}&url=$(printf '%s' "$argc_url" | sed 's/&/%26/g')"
-  [ -n "$argc_email" ] && params="${params}&email=$(printf '%s' "$argc_email" | sed 's/@/%40/g; s/\./%2E/g')"
-  [ -n "$argc_phone" ] && params="${params}&phone=$(printf '%s' "$argc_phone" | sed 's/ /%20/g; s/+/%2B/g')"
+  [[ -n "$argc_minimum_probability" ]] && params+="&minimum_probability=${argc_minimum_probability}"
+  [[ -n "$argc_minimum_match" ]] && params+="&minimum_match=${argc_minimum_match}"
+  [[ -n "$argc_show_sources" ]] && params+="&show_sources=${argc_show_sources}"
+  [[ "${argc_no_live_feeds:-0}" == "1" ]] && params+="&live_feeds=false"
+  [[ -n "$argc_match_requirements" ]] && params+="&match_requirements=${argc_match_requirements}"
+  [[ -n "$argc_source_category_requirements" ]] && params+="&source_category_requirements=${argc_source_category_requirements}"
+  [[ "${argc_top_match:-0}" == "1" ]] && params+="&top_match=true"
+  [[ "${argc_hide_sponsored:-0}" == "1" ]] && params+="&hide_sponsored=true"
 
   echo "$params"
 }
 
-show_help() {
-  echo "${bold}PIPL Search API Client${reset}"
-  echo ""
-  echo "${bold}Commands:${reset}"
-  echo "  ${cyan}people${reset}     Search for a person using various parameters"
-  echo "  ${cyan}email${reset}     Search by email address"
-  echo "  ${cyan}phone${reset}     Search by phone number"
-  echo "  ${cyan}pointer${reset}   Search using a search pointer from previous results"
-  echo "  ${cyan}person-json${reset}    Search using a JSON person object"
-  echo ""
-  echo "${bold}Examples:${reset}"
-  echo "  ${green}$(basename "$0") people -f John -l Doe -c Boston${reset}"
-  echo "  ${green}$(basename "$0") email john.doe@example.com${reset}"
-  echo "  ${green}$(basename "$0") phone '+1(555)123-4567'${reset}"
-  echo "  ${green}$(basename "$0") pointer 'abc123...'${reset}"
-  echo "  ${green}$(basename "$0") person-json '{\"names\":[{\"first\":\"John\"}]}'${reset}"
-  echo "  ${green}$(basename "$0") email john.doe@example.com${reset}"
-  echo ""
-  echo "${bold}Global Options:${reset}"
-  echo "  ${yellow}-k, --key${reset}                    PIPL API key"
-  echo "  ${yellow}-j, --json${reset}                   Deprecated - JSON is now the default output"
-  echo "  ${yellow}-q, --quiet${reset}                  Suppress colored output"
-
-  echo ""
-  echo "${bold}Search Configuration:${reset}"
-  echo "  ${yellow}--minimum-probability${reset}        Minimum probability for inferred data (0-1)"
-  echo "  ${yellow}--minimum-match${reset}              Minimum match score (0-1)"
-  echo "  ${yellow}--no-top-match${reset}               Return all matches (default: top match only)"
-  echo "  ${yellow}--show-sources${reset}               Show data sources (true, false, all, matching)"
-  echo "  ${yellow}--live-feeds${reset}                 Use live data sources"
-  echo "  ${yellow}--hide-sponsored${reset}             Omit sponsored results"
-  echo ""
-  echo "${bold}Auto-follow Feature:${reset}"
-  echo "  For possible matches without exact results, the tool can follow search pointers"
-  echo "  to retrieve additional data about those persons. This uses additional API calls."
-  echo "  Maximum follow depth is 5 levels to prevent infinite loops."
+url_encode() {
+  local string="$1"
+  printf '%s' "$string" | sed 's/ /%20/g; s/@/%40/g; s/\./%2E/g; s/+/%2B/g; s/&/%26/g'
 }
 
-format_person_response() {
-  local response="$1"
-  local persons_count
-  local search_id
-  local available_sources
-  local visible_sources
-  
-  persons_count=$(echo "$response" | jq -r '.["@persons_count"] // 0')
-  search_id=$(echo "$response" | jq -r '.["@search_id"] // "N/A"')
-  available_sources=$(echo "$response" | jq -r '.["@available_sources"] // 0')
-  visible_sources=$(echo "$response" | jq -r '.["@visible_sources"] // 0')
+format_person() {
+  local person="$1"
+  local match_score=""
 
-  # Print search metadata
-  printf "${dim}Search ID: %s | Sources: %s available, %s visible${reset}\n\n" \
-    "$search_id" "$available_sources" "$visible_sources"
+  match_score=$(echo "$person" | jq -r '.["@match"] // empty')
+  [[ -n "$match_score" ]] && printf "${bold}Match Score:${reset} ${yellow}%.2f${reset}\n" "$match_score"
 
-  # Show available data summary
-  local premium_data
-  premium_data=$(echo "$response" | jq -r '.available_data.premium // {}')
-  if [ "$premium_data" != "{}" ]; then
-    print_section "Available Data Summary"
-    echo "$premium_data" | jq -r 'to_entries[] | select(.value > 0) | "\(.key)|\(.value)"' | \
-      while IFS="|" read -r key value; do
-        local formatted_key
-        formatted_key=$(echo "$key" | sed 's/_/ /g' | sed 's/\b\w/\U&/g')
-        printf "  ${cyan}%s:${reset} ${yellow}%s${reset}\n" "$formatted_key" "$value"
-      done
-    echo ""
-  fi
-
-  # Process exact match person
-  local person_data
-  person_data=$(echo "$response" | jq -r '.person // empty')
-  if [ -n "$person_data" ] && [ "$person_data" != "null" ]; then
-    printf "${bold}${green}EXACT MATCH${reset}\n"
-    printf "${bold}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${reset}\n\n"
-    format_single_person "$person_data" "exact"
-  fi
-
-  # Process possible persons
-  local possible_persons
-  possible_persons=$(echo "$response" | jq -r '.possible_persons[]? // empty')
-  if [ -n "$possible_persons" ]; then
-    printf "\n${bold}${yellow}POSSIBLE MATCHES${reset}\n"
-    printf "${bold}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${reset}\n\n"
-
-    local count=1
-    echo "$response" | jq -c '.possible_persons[]?' | while read -r person; do
-      printf "${bold}Possible Match #%s${reset}\n" "$count"
-      format_single_person "$person" "possible"
-      printf "\n"
-      count=$((count + 1))
-    done
-  fi
-
-  # Show warnings if any
-  local warnings
-  warnings=$(echo "$response" | jq -r '.warnings[]? // empty')
-  if [ -n "$warnings" ]; then
-    print_section "Warnings"
-    echo "$warnings" | while read -r warning; do
-      printf "  ${yellow}•${reset} %s\n" "$warning"
-    done
-  fi
-  
-  # Check for search pointer in the response and follow it
-  local search_pointer
-  search_pointer=$(echo "$response" | jq -r '.person["@search_pointer"] // .possible_persons[0]["@search_pointer"] // empty')
-  if [ -n "$search_pointer" ] && [ "$search_pointer" != "N/A" ]; then
-    # Only follow if we have possible persons without an exact match
-    local has_exact_match
-    has_exact_match=$(echo "$response" | jq -r '.person // empty')
-    if [ -z "$has_exact_match" ] || [ "$has_exact_match" = "null" ]; then
-      follow_search_pointer "$search_pointer" 1
-    fi
-  fi
-}
-
-format_single_person() {
-  local person_data="$1"
-  local match_type="$2"
-
-  local match_score
-  local search_pointer
-  
-  match_score=$(echo "$person_data" | jq -r '.["@match"] // "N/A"')
-  search_pointer=$(echo "$person_data" | jq -r '.["@search_pointer"] // "N/A"')
-
-  if [ "$match_type" = "possible" ] && [ "$match_score" != "N/A" ]; then
-    printf "${bold}Match Score:${reset} ${yellow}%.2f${reset}\n" "$match_score"
-  fi
-
-  # Names
   local names
-  names=$(echo "$person_data" | jq -r '.names[]? // empty')
-  if [ -n "$names" ]; then
-    print_section "Names"
-    echo "$person_data" | jq -r '.names[] | "\(.prefix // "")|\(.first // "")|\(.middle // "")|\(.last // "")|\(.display // "")"' | \
-      while IFS="|" read -r prefix first middle last display; do
-        printf "  "
-        [ -n "$prefix" ] && printf "${blue}%s ${reset}" "$prefix"
-        [ -n "$first" ] && printf "${green}%s${reset}" "$first"
-        [ -n "$middle" ] && printf " ${green}%s${reset}" "$middle"
-        [ -n "$last" ] && printf " ${green}%s${reset}" "$last"
-        [ -n "$display" ] && [ "$display" != "$first $middle $last" ] && printf " ${dim}(%s)${reset}" "$display"
-        printf "\n"
+  names=$(echo "$person" | jq -r '.names[]?' 2>/dev/null)
+  if [[ -n "$names" ]]; then
+    printf "\n%sNames:%s\n" "$bold" "$reset"
+    echo "$person" | jq -r '.names[] | "\(.first // "")|\(.middle // "")|\(.last // "")|\(.display // "")"' |
+      while IFS="|" read -r first middle last display; do
+        printf "  %s%%s" "$green" "$first"
+        [[ -n "$middle" ]] && printf " %s" "$middle"
+        [[ -n "$last" ]] && printf " %s" "$last"
+        [[ -n "$display" && "$display" != "$first $middle $last" ]] && printf " ${dim}(%s)${reset}" "$display"
+        printf "%s\n" "$reset"
       done
   fi
 
-  # Gender and DOB
   local gender
-  local dob_display
-  
-  gender=$(echo "$person_data" | jq -r '.gender.content // "N/A"')
-  dob_display=$(echo "$person_data" | jq -r '.dob.display // "N/A"')
+  gender=$(echo "$person" | jq -r '.gender.content // empty')
+  local dob
+  dob=$(echo "$person" | jq -r '.dob.display // empty')
 
-  if [ "$gender" != "N/A" ] || [ "$dob_display" != "N/A" ]; then
-    print_section "Personal Info"
-    [ "$gender" != "N/A" ] && printf "  ${cyan}Gender:${reset} ${magenta}%s${reset}\n" "$gender"
-    [ "$dob_display" != "N/A" ] && printf "  ${cyan}Date of Birth:${reset} ${yellow}%s${reset}\n" "$dob_display"
+  if [[ -n "$gender" || -n "$dob" ]]; then
+    printf "\n%sPersonal Info:%s\n" "$bold" "$reset"
+    [[ -n "$gender" ]] && printf "  %sGender:%s %s%s%s\n" "$cyan" "$reset" "$magenta" "$gender" "$reset"
+    [[ -n "$dob" ]] && printf "  %sDate of Birth:%s %s%s%s\n" "$cyan" "$reset" "$yellow" "$dob" "$reset"
   fi
 
-  # Phones
   local phones
-  phones=$(echo "$person_data" | jq -r '.phones[]? // empty')
-  if [ -n "$phones" ]; then
-    print_section "Phone Numbers"
-    echo "$person_data" | jq -r '.phones[] | "\(.["@type"] // "unknown")|\(.display_international // .display // "N/A")"' | \
+  phones=$(echo "$person" | jq -r '.phones[]?' 2>/dev/null)
+  if [[ -n "$phones" ]]; then
+    printf "\n%sPhone Numbers:%s\n" "$bold" "$reset"
+    echo "$person" | jq -r '.phones[] | "\(.["@type"] // "phone")|\(.display_international // .display // "")"' |
       while IFS="|" read -r type display; do
-        local type_formatted
-        type_formatted=$(echo "$type" | sed 's/\b\w/\U&/g')
-        printf "  ${cyan}%s:${reset} ${blue}%s${reset}\n" "$type_formatted" "$display"
+        printf "  %s%s:%s %s%s%s\n" "$cyan" "${type^}" "$reset" "$blue" "$display" "$reset"
       done
   fi
 
-  # Addresses
   local addresses
-  addresses=$(echo "$person_data" | jq -r '.addresses[]? // empty')
-  if [ -n "$addresses" ]; then
-    print_section "Addresses"
-    echo "$person_data" | jq -r '.addresses[] | "\(.display // "")"' | \
+  addresses=$(echo "$person" | jq -r '.addresses[]?' 2>/dev/null)
+  if [[ -n "$addresses" ]]; then
+    printf "\n%sAddresses:%s\n" "$bold" "$reset"
+    echo "$person" | jq -r '.addresses[].display // empty' |
       while read -r address; do
-        [ -n "$address" ] && printf "  ${magenta}%s${reset}\n" "$address"
+        [[ -n "$address" ]] && printf "  %s%s%s\n" "$magenta" "$address" "$reset"
       done
   fi
 
-  # Jobs
   local jobs
-  jobs=$(echo "$person_data" | jq -r '.jobs[]? // empty')
-  if [ -n "$jobs" ]; then
-    print_section "Employment"
-    echo "$person_data" | jq -r '.jobs[] | "\(.title // "")|\(.organization // "")|\(.display // "")"' | \
-      while IFS="|" read -r title org display; do
-        printf "  "
-        [ -n "$title" ] && printf "${yellow}%s${reset}" "$title"
-        [ -n "$title" ] && [ -n "$org" ] && printf " at "
-        [ -n "$org" ] && printf "${blue}%s${reset}" "$org"
-        [ -n "$display" ] && [ "$display" != "$title $org" ] && printf " ${dim}(%s)${reset}" "$display"
+  jobs=$(echo "$person" | jq -r '.jobs[]?' 2>/dev/null)
+  if [[ -n "$jobs" ]]; then
+    printf "\n%sEmployment:%s\n" "$bold" "$reset"
+    echo "$person" | jq -r '.jobs[] | "\(.title // "")|\(.organization // "")"' |
+      while IFS="|" read -r title org; do
+        printf "  %s%s%s" "$yellow" "$title" "$reset"
+        [[ -n "$org" ]] && printf " at %s%s%s" "$blue" "$org" "$reset"
         printf "\n"
       done
   fi
 
-  # Education
   local educations
-  educations=$(echo "$person_data" | jq -r '.educations[]? // empty')
-  if [ -n "$educations" ]; then
-    print_section "Education"
-    echo "$person_data" | jq -r '.educations[] | "\(.degree // "")|\(.school // "")|\(.display // "")"' | \
-      while IFS="|" read -r degree school display; do
-        printf "  "
-        [ -n "$degree" ] && printf "${yellow}%s${reset}" "$degree"
-        [ -n "$degree" ] && [ -n "$school" ] && printf " from "
-        [ -n "$school" ] && printf "${blue}%s${reset}" "$school"
-        [ -n "$display" ] && [ "$display" != "$degree $school" ] && printf " ${dim}(%s)${reset}" "$display"
+  educations=$(echo "$person" | jq -r '.educations[]?' 2>/dev/null)
+  if [[ -n "$educations" ]]; then
+    printf "\n%sEducation:%s\n" "$bold" "$reset"
+    echo "$person" | jq -r '.educations[] | "\(.degree // "")|\(.school // "")"' |
+      while IFS="|" read -r degree school; do
+        printf "  %s%s%s" "$yellow" "$degree" "$reset"
+        [[ -n "$school" ]] && printf " from %s%s%s" "$blue" "$school" "$reset"
         printf "\n"
       done
   fi
 
-  # Usernames
   local usernames
-  usernames=$(echo "$person_data" | jq -r '.usernames[]? // empty')
-  if [ -n "$usernames" ]; then
-    print_section "Usernames"
-    echo "$person_data" | jq -r '.usernames[].content // empty' | \
-      while read -r username; do
-        printf "  ${cyan}@%s${reset}\n" "$username"
-      done
-  fi
-
-  # User IDs
+  usernames=$(echo "$person" | jq -r '.usernames[]?' 2>/dev/null)
   local user_ids
-  user_ids=$(echo "$person_data" | jq -r '.user_ids[]? // empty')
-  if [ -n "$user_ids" ]; then
-    print_section "Social Media IDs"
-    echo "$person_data" | jq -r '.user_ids[].content // empty' | \
+  user_ids=$(echo "$person" | jq -r '.user_ids[]?' 2>/dev/null)
+
+  if [[ -n "$usernames" || -n "$user_ids" ]]; then
+    printf "\n%sSocial Media:%s\n" "$bold" "$reset"
+    echo "$person" | jq -r '.usernames[].content // empty' |
+      while read -r username; do
+        printf "  %s@%s%s\n" "$cyan" "$username" "$reset"
+      done
+    echo "$person" | jq -r '.user_ids[].content // empty' |
       while read -r user_id; do
-        printf "  ${blue}%s${reset}\n" "$user_id"
+        printf "  %s%s%s\n" "$blue" "$user_id" "$reset"
       done
   fi
 
-  # Images
-  local images
-  images=$(echo "$person_data" | jq -r '.images[]? // empty')
-  if [ -n "$images" ]; then
-    print_section "Profile Images"
-    echo "$person_data" | jq -r '.images[].url // empty' | \
-      while read -r url; do
-        printf "  ${blue}%s${reset}\n" "$url"
-      done
-  fi
-
-  # Relationships
-  local relationships
-  relationships=$(echo "$person_data" | jq -r '.relationships[]? // empty')
-  if [ -n "$relationships" ]; then
-    print_section "Relationships"
-    echo "$person_data" | jq -r '.relationships[] | "\(.["@type"] // "")|\(.["@subtype"] // "")|\(.names[0].display // (.names[0].first + " " + .names[0].last) // "")"' | \
-      while IFS="|" read -r type subtype name; do
-        printf "  ${cyan}%s" "$type"
-        [ -n "$subtype" ] && printf " (%s)" "$subtype"
-        printf ":${reset} ${green}%s${reset}\n" "$name"
-      done
-  fi
-
-  # Languages
-  local languages
-  languages=$(echo "$person_data" | jq -r '.languages[]? // empty')
-  if [ -n "$languages" ]; then
-    print_section "Languages"
-    echo "$person_data" | jq -r '.languages[] | "\(.language // "")|\(.region // "")"' | \
-      while IFS="|" read -r language region; do
-        printf "  ${magenta}%s${reset}" "$language"
-        [ -n "$region" ] && printf " ${dim}(%s)${reset}" "$region"
-        printf "\n"
-      done
-  fi
-
-  # Search pointer for follow-up searches
-  if [ "$search_pointer" != "N/A" ] && [ "$match_type" = "possible" ]; then
-    print_section "Follow-up Search"
-    printf "  ${dim}Use: $(basename "$0") pointer --search-pointer '%s'${reset}\n" "${search_pointer:0:50}..."
+  local search_pointer
+  search_pointer=$(echo "$person" | jq -r '.["@search_pointer"] // empty')
+  if [[ -n "$search_pointer" ]]; then
+    printf "\n%sFollow-up search: pipl pointer '%s'%s\n" "$dim" "${search_pointer:0:50}..." "$reset"
   fi
 }
 
-show_rate_limits() {
+format_response() {
   local response="$1"
 
-  # Extract rate limit headers (these would typically come from curl headers, but we'd need to modify the request)
-  # For now, we'll show package info if available in response
-  printf "\n${dim}API Usage Information:${reset}\n"
-  printf "${dim}For detailed rate limits and quotas, check response headers or your PIPL dashboard${reset}\n"
-}
+  if [[ "${argc_json:-0}" == "1" ]]; then
+    echo "$response" | jq
+    return
+  fi
 
-# Function to follow search_id for additional results
-# Format response without following search pointers (to avoid recursion)
-format_single_response() {
-  local response="$1"
   local persons_count
-  local search_id
-  local available_sources
-  local visible_sources
-  
   persons_count=$(echo "$response" | jq -r '.["@persons_count"] // 0')
+  local search_id
   search_id=$(echo "$response" | jq -r '.["@search_id"] // "N/A"')
-  available_sources=$(echo "$response" | jq -r '.["@available_sources"] // 0')
-  visible_sources=$(echo "$response" | jq -r '.["@visible_sources"] // 0')
 
-  # Print search metadata
-  printf "${dim}Search ID: %s | Sources: %s available, %s visible${reset}\n\n" \
-    "$search_id" "$available_sources" "$visible_sources"
+  printf "%sSearch ID: %s | Persons found: %s%s\n" "$dim" "$search_id" "$persons_count" "$reset"
 
-  # Process exact match person
-  local person_data
-  person_data=$(echo "$response" | jq -r '.person // empty')
-  if [ -n "$person_data" ] && [ "$person_data" != "null" ]; then
-    printf "${bold}${green}EXACT MATCH (from follow-up)${reset}\n"
-    printf "${bold}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${reset}\n\n"
-    format_single_person "$person_data" "exact"
+  local person
+  person=$(echo "$response" | jq -r '.person // empty')
+  if [[ -n "$person" && "$person" != "null" ]]; then
+    printf "\n%s%sEXACT MATCH%s\n" "$bold" "$green" "$reset"
+    printf "${bold}%s${reset}\n" "$(printf '━%.0s' {1..60})"
+    format_person "$person"
   fi
 
-  # Process possible persons
-  local possible_persons
-  possible_persons=$(echo "$response" | jq -r '.possible_persons[]? // empty')
-  if [ -n "$possible_persons" ]; then
-    printf "\n${bold}${yellow}POSSIBLE MATCHES (from follow-up)${reset}\n"
-    printf "${bold}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${reset}\n\n"
+  local possible_count
+  possible_count=$(echo "$response" | jq -r '.possible_persons | length // 0')
+  if [[ "$possible_count" -gt 0 ]]; then
+    printf "\n%s%sPOSSIBLE MATCHES (%s)%s\n" "$bold" "$yellow" "$possible_count" "$reset"
+    printf "%s%s%s\n" "$bold" "$(printf '━%.0s' {1..60})" "$reset"
 
     local count=1
-    echo "$response" | jq -c '.possible_persons[]?' | while read -r person; do
-      printf "${bold}Possible Match #%s${reset}\n" "$count"
-      format_single_person "$person" "possible"
-      printf "\n"
+    echo "$response" | jq -c '.possible_persons[]?' | while read -r possible_person; do
+      printf "\n%sMatch #%s:%s\n" "$bold" "$count" "$reset"
+      format_person "$possible_person"
       count=$((count + 1))
     done
   fi
+
+  local warnings
+  warnings=$(echo "$response" | jq -r '.warnings[]?' 2>/dev/null)
+  if [[ -n "$warnings" ]]; then
+    printf "\n%sWarnings:%s\n" "$yellow" "$reset"
+    while read -r warning; do
+      printf "  %s•%s %s\n" "$yellow" "$reset" "$warning"
+    done <<<"$warnings"
+  fi
 }
 
-follow_search_pointer() {
-  local search_pointer="$1"
-  local follow_count="$2"
-  
-  if [ -z "$search_pointer" ] || [ "$search_pointer" = "N/A" ]; then
-    return 0
+# @cmd Search by email address
+# @arg email! "Email address to search"
+email() {
+  setup_colors
+  API_KEY=$(get_api_key)
+
+  local params
+  params=$(build_search_params)
+  # shellcheck disable=SC2154
+  params+="&email=$(url_encode "${argc_email}")"
+
+  local response
+  response=$(make_request "GET" "$params")
+  format_response "$response"
+}
+
+# @cmd Search by phone number
+# @arg phone! "Phone number (international format preferred)"
+phone() {
+  setup_colors
+  API_KEY=$(get_api_key)
+
+  local cleaned_phone
+  # shellcheck disable=SC2154
+  cleaned_phone=$(echo "${argc_phone}" | tr -d '().-' | tr -s ' ')
+
+  local params
+  params=$(build_search_params)
+  params+="&phone=$(url_encode "$cleaned_phone")"
+
+  local response
+  response=$(make_request "GET" "$params")
+  format_response "$response"
+}
+
+# @cmd Search by username
+# @arg username! "Username (minimum 3 characters)"
+username() {
+  setup_colors
+  API_KEY=$(get_api_key)
+
+  # shellcheck disable=SC2154
+  if [[ ${#argc_username} -lt 3 ]]; then
+    echo "${red}Error:${reset} Username must be at least 3 characters" >&2
+    exit 1
   fi
-  
-  if [ "$follow_count" -gt 5 ]; then
-    # Maximum follow depth reached
-    return 0
-  fi
-  
-  # Following search pointer silently
-  
-  # Build params for search pointer follow-up
-  local config_params=""
-  [ -n "$argc_minimum_probability" ] && config_params="${config_params}&minimum_probability=${argc_minimum_probability}"
-  [ -n "$argc_minimum_match" ] && config_params="${config_params}&minimum_match=${argc_minimum_match}"
-  [ -n "$argc_show_sources" ] && config_params="${config_params}&show_sources=${argc_show_sources}"
-  if [ "$argc_live_feeds" = 1 ]; then
-    config_params="${config_params}&live_feeds=true"
-  fi
-  [ -n "$argc_match_requirements" ] && config_params="${config_params}&match_requirements=${argc_match_requirements}"
-  [ -n "$argc_source_category_requirements" ] && config_params="${config_params}&source_category_requirements=${argc_source_category_requirements}"
-  # Default to top_match=true unless --no-top-match is specified
-  if [ "$argc_no_top_match" != 1 ]; then
-    config_params="${config_params}&top_match=true"
-  fi
-  [ "$argc_hide_sponsored" = 1 ] && config_params="${config_params}&hide_sponsored=true"
-  
-  # Use search pointer (sp) parameter for follow-up searches
-  local data="sp=${search_pointer}"
-  local follow_response
-  
-  follow_response=$(make_request "POST" "$config_params" "$data")
-  
-  if [ -n "$follow_response" ]; then
-    echo "$follow_response" | jq
-    
-    # Check if there's another search pointer to follow recursively
-    local next_search_pointer
-    next_search_pointer=$(echo "$follow_response" | jq -r '.person["@search_pointer"] // .possible_persons[0]["@search_pointer"] // empty')
-    if [ -n "$next_search_pointer" ] && [ "$next_search_pointer" != "N/A" ] && [ "$next_search_pointer" != "$search_pointer" ]; then
-      follow_search_pointer "$next_search_pointer" $((follow_count + 1))
+
+  local params
+  params=$(build_search_params)
+  params+="&username=${argc_username}"
+
+  local response
+  response=$(make_request "GET" "$params")
+  format_response "$response"
+}
+
+# @cmd Search by social media URL
+# @arg url! "Social media profile URL"
+url() {
+  setup_colors
+  API_KEY=$(get_api_key)
+
+  local params
+  params=$(build_search_params)
+  # shellcheck disable=SC2154
+  params+="&url=$(url_encode "${argc_url}")"
+
+  local response
+  response=$(make_request "GET" "$params")
+  format_response "$response"
+}
+
+# @cmd Search by user ID
+# @arg user_id! "User ID with service (e.g., 123456@facebook)"
+user-id() {
+  setup_colors
+  API_KEY=$(get_api_key)
+
+  local params
+  params=$(build_search_params)
+  # shellcheck disable=SC2154
+  params+="&user_id=$(url_encode "${argc_user_id}")"
+
+  local response
+  response=$(make_request "GET" "$params")
+  format_response "$response"
+}
+
+# @cmd Follow up on a search pointer
+# @arg search_pointer! "Search pointer from previous results"
+pointer() {
+  setup_colors
+  API_KEY=$(get_api_key)
+
+  local params
+  params=$(build_search_params)
+  # shellcheck disable=SC2154
+  local data="sp=${argc_search_pointer}"
+
+  local response
+  response=$(make_request "POST" "$params" "$data")
+  format_response "$response"
+}
+
+# @cmd Search for people by name, location, email, or phone
+# @alias search
+# @option -f --first "First name"
+# @option -l --last "Last name"
+# @option -m --middle "Middle name"
+# @option -n --name "Full name (unparsed)"
+# @option --house "House number"
+# @option --street "Street name"
+# @option -c --city "City name"
+# @option -s --state "State or province"
+# @option -z --zip "ZIP/postal code"
+# @option --country "Country (2-letter ISO code)"
+# @option -a --address "Full address (unparsed)"
+# @option --age "Age or age range (e.g., 25 or 25-30)"
+# @flag --no-followup "Disable automatic search pointer follow-up"
+# @arg query "Quick search: 'John Doe' or 'john.doe@email.com' or phone"
+people() {
+  setup_colors
+  API_KEY=$(get_api_key)
+
+  local params
+  params=$(build_search_params)
+
+  # If a quick query arg is provided, determine what it is
+  # shellcheck disable=SC2154
+  if [[ -n "${argc_query}" ]]; then
+    # Check if it's an email
+    if [[ "${argc_query}" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
+      params+="&email=$(url_encode "${argc_query}")"
+    # Check if it's a phone number (contains mostly digits)
+    elif [[ "${argc_query}" =~ ^[0-9+\(\)\ \-\.]+$ ]] && [[ "${#argc_query}" -ge 7 ]]; then
+      local cleaned_phone
+      cleaned_phone=$(echo "${argc_query}" | tr -d '().-' | tr -s ' ')
+      params+="&phone=$(url_encode "$cleaned_phone")"
+    # Otherwise treat as a name
+    else
+      params+="&raw_name=$(url_encode "${argc_query}")"
     fi
   fi
+
+  # Add explicit parameters if provided
+  [[ -n "${argc_first}" ]] && params+="&first_name=$(url_encode "${argc_first}")"
+  [[ -n "${argc_middle}" ]] && params+="&middle_name=$(url_encode "${argc_middle}")"
+  [[ -n "${argc_last}" ]] && params+="&last_name=$(url_encode "${argc_last}")"
+  [[ -n "${argc_name}" ]] && params+="&raw_name=$(url_encode "${argc_name}")"
+  [[ -n "${argc_house}" ]] && params+="&house=$(url_encode "${argc_house}")"
+  [[ -n "${argc_street}" ]] && params+="&street=$(url_encode "${argc_street}")"
+  [[ -n "${argc_city}" ]] && params+="&city=$(url_encode "${argc_city}")"
+  [[ -n "${argc_state}" ]] && params+="&state=$(url_encode "${argc_state}")"
+  [[ -n "${argc_zip}" ]] && params+="&zipcode=${argc_zip}"
+  [[ -n "${argc_country}" ]] && params+="&country=${argc_country}"
+  [[ -n "${argc_address}" ]] && params+="&raw_address=$(url_encode "${argc_address}")"
+  [[ -n "${argc_age}" ]] && params+="&age=${argc_age}"
+
+  # Check if we have at least one search parameter
+  if [[ -z "${argc_query}${argc_first}${argc_last}${argc_name}${argc_city}${argc_state}${argc_country}${argc_address}${argc_age}${argc_house}${argc_street}" ]]; then
+    echo "${red}Error:${reset} At least one search parameter is required" >&2
+    echo "Try: pipl people 'John Doe' or pipl people --first John --last Doe" >&2
+    exit 1
+  fi
+
+  local response
+  response=$(make_request "GET" "$params")
+  
+  # Check if we got an exact match with a search pointer and auto-followup is enabled
+  if [[ "${argc_no_followup:-0}" != "1" ]]; then
+    local person_pointer
+    person_pointer=$(echo "$response" | jq -r '.person["@search_pointer"] // empty')
+    
+    if [[ -n "$person_pointer" ]]; then
+      # Display initial results
+      format_response "$response"
+      
+      # Inform user about follow-up
+      printf "\n%s━━━ Fetching additional details via search pointer ━━━%s\n\n" "$cyan" "$reset"
+      
+      # Make follow-up request with search pointer
+      local followup_params
+      followup_params=$(build_search_params)
+      local followup_data="sp=${person_pointer}"
+      local followup_response
+      followup_response=$(make_request "POST" "$followup_params" "$followup_data")
+      
+      # Display enhanced results
+      printf "%s%sENHANCED MATCH DETAILS%s\n" "$bold" "$green" "$reset"
+    printf "%s%s%s\n" "$bold" "$(printf '━%.0s' {1..60})" "$reset"
+      format_response "$followup_response"
+    else
+      # No exact match or no search pointer, just display regular results
+      format_response "$response"
+    fi
+  else
+    # Auto-followup disabled, just display regular results
+    format_response "$response"
+  fi
 }
 
-# Main command processing
-if [ -z "$argc_command" ]; then
-  show_help
-  exit 0
-fi
-
-case "$argc_command" in
-people)
-  # Validate that at least one search parameter is provided
-  if [ -z "$argc_first_name$argc_last_name$argc_raw_name$argc_username$argc_user_id$argc_url$argc_city$argc_state$argc_country$argc_raw_address$argc_age" ]; then
-    echo "${red}Error:${reset} At least one search parameter is required." >&2
-    echo "Use name, username, user_id, url, address, or age." >&2
+# @cmd Search using person JSON object
+# @arg person_json! "JSON person object"
+person() {
+  setup_colors
+  API_KEY=$(get_api_key)
+  # shellcheck disable=SC2154
+  if ! echo "${argc_person_json}" | jq . >/dev/null 2>&1; then
+    echo "${red}Error:${reset} Invalid JSON format" >&2
     exit 1
   fi
 
+  local params
   params=$(build_search_params)
-  response=$(make_request "GET" "$params")
-  echo "$response" | jq
-  ;;
+  local encoded_person
+  encoded_person=$(url_encode "${argc_person_json}")
+  local data="person=$encoded_person"
 
-email)
-  # For email command, use the positional argument as email
-  if [ -z "$argc_value" ]; then
-    echo "${red}Error:${reset} Email address is required as positional argument." >&2
-    echo "Usage: $(basename "$0") email <email-address>" >&2
-    exit 1
-  fi
-  # Set the email parameter and clear other search parameters to avoid conflicts
-  argc_email="$argc_value"
-  argc_first_name="" argc_last_name="" argc_phone="" argc_username="" argc_user_id="" argc_url="" argc_city="" argc_state="" argc_country="" argc_raw_address="" argc_age="" argc_raw_name="" argc_middle_name="" argc_house="" argc_street="" argc_zipcode=""
+  local response
+  response=$(make_request "POST" "$params" "$data")
+  format_response "$response"
+}
 
-  params=$(build_search_params)
-  response=$(make_request "GET" "$params")
-  echo "$response" | jq
-  ;;
-
-phone)
-  # For phone command, use the positional argument as phone
-  if [ -z "$argc_value" ]; then
-    echo "${red}Error:${reset} Phone number is required as positional argument." >&2
-    echo "Usage: $(basename "$0") phone <phone-number>" >&2
-    exit 1
-  fi
-  # Set the phone parameter and clear other search parameters to avoid conflicts
-  argc_phone="$argc_value"
-  argc_first_name="" argc_last_name="" argc_email="" argc_username="" argc_user_id="" argc_url="" argc_city="" argc_state="" argc_country="" argc_raw_address="" argc_age="" argc_raw_name="" argc_middle_name="" argc_house="" argc_street="" argc_zipcode=""
-
-  params=$(build_search_params)
-  response=$(make_request "GET" "$params")
-  echo "$response" | jq
-  ;;
-
-pointer)
-  # For pointer command, use positional argument or --search-pointer flag
-  search_pointer="$argc_value"
-  if [ -z "$search_pointer" ] && [ -n "$argc_search_pointer" ]; then
-    search_pointer="$argc_search_pointer"
-  fi
-  
-  if [ -z "$search_pointer" ]; then
-    echo "${red}Error:${reset} Search pointer is required as positional argument or --search-pointer flag." >&2
-    echo "Usage: $(basename "$0") pointer <search-pointer>" >&2
-    exit 1
-  fi
-
-  config_params=""
-  [ -n "$argc_minimum_probability" ] && config_params="${config_params}&minimum_probability=${argc_minimum_probability}"
-  [ -n "$argc_minimum_match" ] && config_params="${config_params}&minimum_match=${argc_minimum_match}"
-  [ -n "$argc_show_sources" ] && config_params="${config_params}&show_sources=${argc_show_sources}"
-  if [ "$argc_live_feeds" = 1 ]; then
-    config_params="${config_params}&live_feeds=true"
-  fi
-  [ -n "$argc_match_requirements" ] && config_params="${config_params}&match_requirements=${argc_match_requirements}"
-  [ -n "$argc_source_category_requirements" ] && config_params="${config_params}&source_category_requirements=${argc_source_category_requirements}"
-  # Default to top_match=true unless --no-top-match is specified
-  if [ "$argc_no_top_match" != 1 ]; then
-    config_params="${config_params}&top_match=true"
-  fi
-  [ "$argc_hide_sponsored" = 1 ] && config_params="${config_params}&hide_sponsored=true"
-
-  data="sp=${search_pointer}"
-  response=$(make_request "POST" "$config_params" "$data")
-  echo "$response" | jq
-  ;;
-
-person-json)
-  # For person-json command, use positional argument or --person-json flag
-  person_json="$argc_value"
-  if [ -z "$person_json" ] && [ -n "$argc_person_json" ]; then
-    person_json="$argc_person_json"
-  fi
-  
-  if [ -z "$person_json" ]; then
-    echo "${red}Error:${reset} Person JSON string is required as positional argument or --person-json flag." >&2
-    echo "Usage: $(basename "$0") person-json <json-string>" >&2
-    echo "Example: $(basename "$0") person-json '{\"names\":[{\"first\":\"John\",\"last\":\"Doe\"}]}'" >&2
-    exit 1
-  fi
-
-  # Validate JSON
-  if ! echo "$person_json" | jq . >/dev/null 2>&1; then
-    echo "${red}Error:${reset} Invalid JSON in person parameter." >&2
-    exit 1
-  fi
-
-  config_params=""
-  [ -n "$argc_minimum_probability" ] && config_params="${config_params}&minimum_probability=${argc_minimum_probability}"
-  [ -n "$argc_minimum_match" ] && config_params="${config_params}&minimum_match=${argc_minimum_match}"
-  [ -n "$argc_show_sources" ] && config_params="${config_params}&show_sources=${argc_show_sources}"
-  if [ "$argc_live_feeds" = 1 ]; then
-    config_params="${config_params}&live_feeds=true"
-  fi
-  [ -n "$argc_match_requirements" ] && config_params="${config_params}&match_requirements=${argc_match_requirements}"
-  [ -n "$argc_source_category_requirements" ] && config_params="${config_params}&source_category_requirements=${argc_source_category_requirements}"
-  # Default to top_match=true unless --no-top-match is specified
-  if [ "$argc_no_top_match" != 1 ]; then
-    config_params="${config_params}&top_match=true"
-  fi
-  [ "$argc_hide_sponsored" = 1 ] && config_params="${config_params}&hide_sponsored=true"
-
-  # URL encode the JSON
-  encoded_person=$(printf '%s' "$person_json" | sed 's/ /%20/g; s/"/%22/g; s/{/%7B/g; s/}/%7D/g; s/\[/%5B/g; s/\]/%5D/g; s/:/%3A/g; s/,/%2C/g')
-  data="person=${encoded_person}"
-  response=$(make_request "POST" "$config_params" "$data")
-  echo "$response" | jq
-  ;;
-
-*)
-  echo "${red}Error:${reset} Unknown command: ${argc_command}" >&2
-  show_help
-  exit 1
-  ;;
-esac
-
-# Rate limit info removed - JSON output only
+eval "$(argc --argc-eval "$0" "$@")"

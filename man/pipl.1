@@ -1,0 +1,83 @@
+.TH PIPL 1  "pipl 0.0.0" 
+.SH NAME
+pipl \- PIPL Search API client for people intelligence and data enrichment
+.SH SYNOPSIS
+\fBpipl\fR [OPTIONS] <COMMAND>
+.SH OPTIONS
+.TP
+\fB\-k\fR, \fB\-\-key\fR=\fIKEY\fR
+.br
+"PIPL API key (can also use PIPL_API_KEY env var)"
+.TP
+\fB\-j\fR, \fB\-\-json\fR
+.br
+"Output raw JSON (default is formatted)"
+.TP
+\fB\-q\fR, \fB\-\-quiet\fR
+.br
+"Suppress colored output"
+.TP
+\fB\-\-minimum\-probability\fR=\fIMINIMUM\-PROBABILITY\fR
+.br
+"Minimum acceptable probability for inferred data (0\-1)" @default "0.9"
+.TP
+\fB\-\-minimum\-match\fR=\fIMINIMUM\-MATCH\fR
+.br
+"Minimum required match score for possible persons (0\-1)" @default "0"
+.TP
+\fB\-\-show\-sources\fR=\fISHOW\-SOURCES\fR
+.br
+"Sources to show" [true|false|all|matching] @default "true"
+.TP
+\fB\-\-no\-live\-feeds\fR
+.br
+"Disable live data sources"
+.TP
+\fB\-\-match\-requirements\fR=\fIMATCH\-REQUIREMENTS\fR
+.br
+"Fields that must be present in response"
+.TP
+\fB\-\-source\-category\-requirements\fR=\fISOURCE\-CATEGORY\-REQUIREMENTS\fR
+.br
+"Source categories that must be present"
+.TP
+\fB\-\-top\-match\fR
+.br
+"Return only the top match (default behavior)"
+.TP
+\fB\-\-hide\-sponsored\fR
+.br
+"Omit sponsored results"
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+.br
+Print help
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+.br
+Print version
+.SH SUBCOMMANDS
+.TP
+pipl\-email(1)
+Search by email address
+.TP
+pipl\-phone(1)
+Search by phone number
+.TP
+pipl\-username(1)
+Search by username
+.TP
+pipl\-url(1)
+Search by social media URL
+.TP
+pipl\-user\-id(1)
+Search by user ID
+.TP
+pipl\-pointer(1)
+Follow up on a search pointer
+.TP
+pipl\-people(1)
+Search for people by name, location, email, or phone
+.TP
+pipl\-person(1)
+Search using person JSON object
